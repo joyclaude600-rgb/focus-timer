@@ -8,14 +8,15 @@
 <body>
 <!-- Trello loads this page invisibly; it tells Trello which buttons and badges to show. -->
 <script>
+const VERSION = 4; // bump when uploading changes so Trello doesn't load an old cached copy
 const ICON = new URL('./icon.svg', location.href).href;
 const ICON_WHITE = new URL('./icon-white.svg', location.href).href;
 
 function openTimer(t) {
-  return t.modal({ url: './timer.html', title: 'Focus Timer', height: 720, accentColor: '#d9553b' });
+  return t.modal({ url: './timer.html?v=' + VERSION, title: 'Focus Timer', height: 720, accentColor: '#d9553b' });
 }
 function openReport(t) {
-  return t.modal({ url: './report.html', title: 'Focus report', height: 560, accentColor: '#d9553b' });
+  return t.modal({ url: './report.html?v=' + VERSION, title: 'Focus report', height: 560, accentColor: '#d9553b' });
 }
 
 function fmtDur(sec) {

@@ -94,7 +94,7 @@
       <div><button class="btn primary" id="sSave" style="min-width:0">Save settings</button></div>
     </div>
   </details>
-  <div class="note">Keep this window open while the timer runs. Skipping a focus session logs the time you spent if it's at least a minute.</div>
+  <div class="note">Keep this window open while the timer runs. Skipping a focus session logs the time you spent if it's at least a minute. · v4</div>
 </main>
 
 <script>
@@ -211,6 +211,10 @@ function setupPlayer() {
   $('player').hidden = !uri;
   if (!uri) { if (controller) controller.pause(); return; }
   $('openSpotify').href = settings.spotifyUrl;
+  if (plainPlayer) {
+    if (uri !== loadedUri) { const [, type, id] = uri.split(':'); $('embed').src = `https://open.spotify.com/embed/${type}/${id}`; loadedUri = uri; }
+    return;
+  }
   if (!spotifyApi || uri === loadedUri) return;
   loadedUri = uri; musicStarted = false;
   if (controller) return controller.loadUri(uri);
@@ -227,11 +231,27 @@ function musicPlay() {
 }
 function musicPause() { if (controller && !musicPaused) controller.pause(); }
 
-window.onSpotifyIframeApiReady = api => { spotifyApi = api; setupPlayer(); };
+// If Spotify's control script can't load (some browsers block it inside Trello),
+// fall back to a plain embedded player you press play on yourself.
+let plainPlayer = false;
+function setupPlainPlayer() {
+  const uri = spotifyUri(settings.spotifyUrl);
+  if (spotifyApi || !uri) return;
+  plainPlayer = true;
+  const [, type, id] = uri.split(':');
+  $('embed').outerHTML = `<iframe id="embed" src="https://open.spotify.com/embed/${type}/${id}" width="100%" height="152"
+    frameborder="0" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"></iframe>`;
+  loadedUri = uri;
+  say('Press ▶ on the player to start your music.');
+}
+
+window.onSpotifyIframeApiReady = api => { spotifyApi = api; if (!plainPlayer) setupPlayer(); };
 const spotifyScript = document.createElement('script');
 spotifyScript.src = 'https://open.spotify.com/embed/iframe-api/v1';
 spotifyScript.async = true;
+spotifyScript.onerror = () => setupPlainPlayer();
 document.head.appendChild(spotifyScript);
+setTimeout(setupPlainPlayer, 6000);
 
 function chime() {
   if (!audio) return;
