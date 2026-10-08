@@ -9,19 +9,39 @@
 <!-- Trello loads this page invisibly; it tells Trello which buttons and badges to show. -->
 <script>
 const ICON = new URL('./icon.svg', location.href).href;
+const ICON_WHITE = new URL('./icon-white.svg', location.href).href;
 
 function openTimer(t) {
-  return t.modal({ url: './timer.html', title: 'Focus Timer', height: 470, accentColor: '#d9553b' });
+  return t.modal({ url: './timer.html', title: 'Focus Timer', height: 560, accentColor: '#d9553b' });
+}
+function openReport(t) {
+  return t.modal({ url: './report.html', title: 'Focus report', height: 560, accentColor: '#d9553b' });
 }
 
-function pomos(t) { return t.get('card', 'shared', 'pomos', 0); }
+function fmtDur(sec) {
+  const m = Math.round(sec / 60);
+  if (m < 60) return m + 'm';
+  return Math.floor(m / 60) + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '');
+}
+
+function badgeText(d) {
+  const pomos = d.pomos || 0, sec = d.focusSec || 0;
+  if (!pomos && !sec) return '';
+  return '🍅 ' + pomos + (sec ? ' · ' + fmtDur(sec) : '');
+}
 
 TrelloPowerUp.initialize({
   'card-buttons': () => [{ icon: ICON, text: 'Focus', callback: openTimer }],
-  'card-badges': t => pomos(t).then(n => n ? [{ text: '🍅 ' + n }] : []),
-  'card-detail-badges': t => pomos(t).then(n => [{
-    title: 'Focus sessions', text: n ? '🍅 ' + n : 'None yet', callback: openTimer
-  }])
+  'card-badges': t => t.get('card', 'shared').then(d => {
+    const text = badgeText(d);
+    return text ? [{ text }] : [];
+  }),
+  'card-detail-badges': t => t.get('card', 'shared').then(d => [{
+    title: 'Focus time', text: badgeText(d) || 'None yet', callback: openTimer
+  }]),
+  'board-buttons': () => [{
+    icon: { dark: ICON_WHITE, light: ICON }, text: 'Focus report', callback: openReport
+  }]
 });
 </script>
 </body>

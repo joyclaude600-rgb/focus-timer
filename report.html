@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focus report</title>
+<script src="https://p.trellocdn.com/power-up.min.js"></script>
+<style>
+  :root { --bg: #ffffff; --ink: #172b4d; --muted: #5e6c84; --line: #dfe1e6;
+    --accent: #d9553b; --accent-soft: #fbe7e2; --track: #f1f2f4; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  main { padding: 16px; max-width: 640px; margin: 0 auto; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tabs button { border: 0; background: none; color: var(--muted); padding: 6px 12px;
+    border-radius: 999px; cursor: pointer; font: inherit; font-size: 14px; }
+  .tabs button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .summary { margin: 14px 0 12px; color: var(--muted); font-size: 14px; }
+  .summary b { color: var(--ink); font-size: 20px; margin-right: 6px; }
+  ol { list-style: none; padding: 0; margin: 0; }
+  li { display: grid; grid-template-columns: 24px 1fr auto; gap: 4px 10px; align-items: center;
+    padding: 8px 6px; border-radius: 8px; cursor: pointer; }
+  li:hover { background: var(--track); }
+  .rank { color: var(--muted); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+  .name { font-weight: 600; overflow-wrap: anywhere; }
+  .name small { font-weight: 400; color: var(--muted); margin-left: 6px; }
+  .val { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+  .val small { color: var(--muted); margin-left: 6px; }
+  .bar { grid-column: 2 / 4; height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .empty { color: var(--muted); text-align: center; padding: 32px 8px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="tabs" id="tabs">
+    <button data-p="week">This week</button>
+    <button data-p="30">Last 30 days</button>
+    <button data-p="all">All time</button>
+  </div>
+  <div class="summary" id="summary">Loading…</div>
+  <ol id="list"></ol>
+</main>
+<script>
+let t = null;
+try { if (window.parent !== window) t = TrelloPowerUp.iframe(); } catch {}
+
+const $ = id => document.getElementById(id);
+let rows = [], period = 'week';
+
+function localDay(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function fmtDur(sec) {
+  const m = Math.round(sec / 60);
+  if (m < 60) return m + 'm';
+  return Math.floor(m / 60) + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '');
+}
+function sinceKey(p) {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  if (p === 'week') d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // back to Monday
+  else d.setDate(d.getDate() - 29);
+  return localDay(d);
+}
+function secondsFor(r, p) {
+  if (p === 'all') return r.focusSec || 0;
+  const from = sinceKey(p);
+  return Object.entries(r.log || {}).reduce((sum, [day, s]) => day >= from ? sum + s : sum, 0);
+}
+
+function render() {
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.p === period));
+  const ranked = rows.map(r => ({ ...r, sec: secondsFor(r, period) })).filter(r => r.sec > 0)
+    .sort((a, b) => b.sec - a.sec);
+  const total = ranked.reduce((s, r) => s + r.sec, 0);
+  const label = { week: 'this week', 30: 'in the last 30 days', all: 'in total' }[period];
+  $('summary').innerHTML = ranked.length
+    ? `<b>${fmtDur(total)}</b> focused ${label} across ${ranked.length} card${ranked.length === 1 ? '' : 's'}`
+    : '';
+  const list = $('list');
+  list.innerHTML = '';
+  if (!ranked.length) {
+    list.innerHTML = `<div class="empty">No focus time ${label} yet. Open a card and click <b>Focus</b> to start.</div>`;
+    return;
+  }
+  const max = ranked[0].sec;
+  ranked.slice(0, 25).forEach((r, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="rank">${i + 1}</span><span class="name"></span>
+      <span class="val">${fmtDur(r.sec)}${period === 'all' && r.pomos ? `<small>🍅 ${r.pomos}</small>` : ''}</span>
+      <span class="bar"><i style="width:${Math.max(2, r.sec / max * 100)}%"></i></span>`;
+    const name = li.querySelector('.name');
+    name.textContent = r.name;
+    if (r.list) { const s = document.createElement('small'); s.textContent = r.list; name.appendChild(s); }
+    li.onclick = () => { if (t) t.showCard(r.id); };
+    list.appendChild(li);
+  });
+}
+
+async function load() {
+  if (!t) { // standalone preview with sample data
+    const today = localDay(new Date());
+    rows = [
+      { id: 'a', name: 'Write proposal', list: 'Doing', pomos: 6, focusSec: 9000, log: { [today]: 3000 } },
+      { id: 'b', name: 'Client follow-ups', list: 'To Do', pomos: 2, focusSec: 3000, log: { [today]: 1500 } },
+      { id: 'c', name: 'Q4 budget review', list: 'Done', pomos: 4, focusSec: 6000, log: {} }
+    ];
+    return render();
+  }
+  try {
+    const [cards, lists] = await Promise.all([t.cards('id', 'name', 'idList'), t.lists('id', 'name')]);
+    const listName = Object.fromEntries(lists.map(l => [l.id, l.name]));
+    const data = await Promise.all(cards.map(c => t.get(c.id, 'shared').catch(() => ({}))));
+    rows = cards.map((c, i) => ({ id: c.id, name: c.name, list: listName[c.idList] || '', ...(data[i] || {}) }));
+    render();
+  } catch (err) {
+    $('summary').textContent = 'Could not load the board: ' + (err && err.message || err);
+  }
+}
+
+$('tabs').onclick = e => { if (e.target.dataset.p) { period = e.target.dataset.p; render(); } };
+load();
+</script>
+</body>
+</html>
