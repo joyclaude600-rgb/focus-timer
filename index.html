@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Focus Timer Power-Up</title>
+<script src="https://p.trellocdn.com/power-up.min.js"></script>
+</head>
+<body>
+<!-- Trello loads this page invisibly; it tells Trello which buttons and badges to show. -->
+<script>
+const ICON = new URL('./icon.svg', location.href).href;
+
+function openTimer(t) {
+  return t.modal({ url: './timer.html', title: 'Focus Timer', height: 470, accentColor: '#d9553b' });
+}
+
+function pomos(t) { return t.get('card', 'shared', 'pomos', 0); }
+
+TrelloPowerUp.initialize({
+  'card-buttons': () => [{ icon: ICON, text: 'Focus', callback: openTimer }],
+  'card-badges': t => pomos(t).then(n => n ? [{ text: '🍅 ' + n }] : []),
+  'card-detail-badges': t => pomos(t).then(n => [{
+    title: 'Focus sessions', text: n ? '🍅 ' + n : 'None yet', callback: openTimer
+  }])
+});
+</script>
+</body>
+</html>

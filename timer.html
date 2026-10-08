@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focus Timer</title>
+<script src="https://p.trellocdn.com/power-up.min.js"></script>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #172b4d; --muted: #5e6c84; --line: #dfe1e6;
+    --accent: #d9553b; --accent-soft: #fbe7e2; --break: #2f8f6b; --break-soft: #dff1e9;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  body.break { --accent: var(--break); --accent-soft: var(--break-soft); }
+  main { padding: 16px; text-align: center; }
+
+  .modes { display: flex; gap: 6px; justify-content: center; margin-bottom: 14px; }
+  .modes button { border: 0; background: none; color: var(--muted); padding: 6px 12px;
+    border-radius: 999px; cursor: pointer; font: inherit; font-size: 14px; }
+  .modes button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+  .ring { position: relative; width: 220px; height: 220px; margin: 0 auto; }
+  .ring svg { transform: rotate(-90deg); }
+  .ring circle { fill: none; stroke-width: 10; }
+  .ring .track { stroke: var(--line); }
+  .ring .prog { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset .3s linear; }
+  .time { position: absolute; inset: 0; display: grid; place-content: center; }
+  .time b { font-size: 52px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+  .time span { color: var(--muted); font-size: 13px; }
+
+  .controls { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
+  .btn { border: 1px solid var(--line); background: #fff; color: var(--ink);
+    padding: 9px 16px; border-radius: 8px; font: inherit; cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 110px; font-weight: 600; }
+  .card { margin-top: 14px; font-weight: 600; overflow-wrap: anywhere; }
+  .stats { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="modes" id="modes">
+    <button data-mode="focus">Focus</button>
+    <button data-mode="short">Short break</button>
+    <button data-mode="long">Long break</button>
+  </div>
+  <div class="ring">
+    <svg width="220" height="220"><circle class="track" cx="110" cy="110" r="98"/>
+      <circle class="prog" id="prog" cx="110" cy="110" r="98"/></svg>
+    <div class="time"><b id="clock">25:00</b><span id="phase">Focus</span></div>
+  </div>
+  <div class="controls">
+    <button class="btn primary" id="toggle">Start</button>
+    <button class="btn" id="reset">Reset</button>
+    <button class="btn" id="skip">Skip</button>
+  </div>
+  <div class="card" id="cardName"></div>
+  <div class="stats" id="stats"></div>
+  <div class="note">Keep this window open while the timer runs. Space: start/pause.</div>
+</main>
+
+<script>
+const DURATIONS = { focus: 25 * 60, short: 5 * 60, long: 15 * 60 };
+const C = 2 * Math.PI * 98;
+const $ = id => document.getElementById(id);
+const prog = $('prog');
+prog.style.strokeDasharray = C;
+
+// Inside Trello this talks to the card; opened on its own it still works as a plain timer.
+let t = null;
+try { if (window.parent !== window) t = TrelloPowerUp.iframe(); } catch {}
+
+let mode = 'focus', remaining = DURATIONS.focus, endsAt = null, tick = null, streak = 0, pomos = 0, audio = null;
+
+function fmt(s) { return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+
+function render() {
+  $('clock').textContent = fmt(remaining);
+  prog.style.strokeDashoffset = C * (1 - remaining / DURATIONS[mode]);
+  $('toggle').textContent = endsAt ? 'Pause' : (remaining < DURATIONS[mode] ? 'Resume' : 'Start');
+  $('phase').textContent = mode === 'focus' ? 'Focus' : 'Take a breather';
+  document.body.classList.toggle('break', mode !== 'focus');
+  document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+  $('stats').textContent = `🍅 ${pomos} focus session${pomos === 1 ? '' : 's'} on this card`;
+}
+
+function setMode(m) { pause(); mode = m; remaining = DURATIONS[m]; render(); }
+
+function start() {
+  if (endsAt) return;
+  if (!audio) try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+  endsAt = Date.now() + remaining * 1000;
+  tick = setInterval(() => {
+    remaining = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+    render();
+    if (remaining === 0) finish();
+  }, 250);
+  render();
+}
+function pause() { clearInterval(tick); tick = null; endsAt = null; render(); }
+
+async function finish() {
+  pause();
+  chime();
+  if (mode === 'focus') {
+    streak++;
+    pomos++;
+    if (t) {
+      try {
+        pomos = (await t.get('card', 'shared', 'pomos', 0)) + 1;
+        await t.set('card', 'shared', 'pomos', pomos);
+      } catch {}
+    }
+    setMode(streak % 4 === 0 ? 'long' : 'short');
+  } else {
+    setMode('focus');
+  }
+}
+
+function chime() {
+  if (!audio) return;
+  try {
+    [660, 880, 990].forEach((f, i) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = f; o.connect(g); g.connect(audio.destination);
+      const t0 = audio.currentTime + i * 0.18;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+      o.start(t0); o.stop(t0 + 0.5);
+    });
+  } catch {}
+}
+
+$('toggle').onclick = () => endsAt ? pause() : start();
+$('reset').onclick = () => setMode(mode);
+$('skip').onclick = () => { remaining = 0; finish(); };
+$('modes').onclick = e => { if (e.target.dataset.mode) setMode(e.target.dataset.mode); };
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); endsAt ? pause() : start(); }
+});
+
+if (t) {
+  t.card('name').then(c => { $('cardName').textContent = c.name; }).catch(() => {});
+  t.get('card', 'shared', 'pomos', 0).then(n => { pomos = n; render(); }).catch(() => {});
+}
+render();
+</script>
+</body>
+</html>
