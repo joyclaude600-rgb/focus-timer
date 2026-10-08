@@ -35,7 +35,9 @@
   .btn { border: 1px solid var(--line); background: #fff; color: var(--ink);
     padding: 9px 16px; border-radius: 8px; font: inherit; cursor: pointer; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 110px; font-weight: 600; }
-  .btn.music { border-color: var(--spotify); color: #127a37; }
+  .player { margin-top: 14px; }
+  .player .embed { border-radius: 12px; overflow: hidden; min-height: 152px; }
+  .player a { display: inline-block; margin-top: 6px; font-size: 12px; color: #127a37; }
   .card { margin-top: 14px; font-weight: 600; overflow-wrap: anywhere; }
   .stats { color: var(--muted); font-size: 13px; margin-top: 4px; }
   .note { color: var(--muted); font-size: 12px; margin-top: 10px; }
@@ -68,11 +70,14 @@
     <button class="btn primary" id="toggle">Start</button>
     <button class="btn" id="reset">Reset</button>
     <button class="btn" id="skip" title="End this session now">Skip</button>
-    <button class="btn music" id="music" hidden>🎵 Music</button>
   </div>
   <div class="card" id="cardName"></div>
   <div class="stats" id="stats"></div>
   <div class="msg" id="msg"></div>
+  <div class="player" id="player" hidden>
+    <div class="embed"><div id="embed"></div></div>
+    <a id="openSpotify" target="_blank" rel="noopener">Open in Spotify</a>
+  </div>
 
   <details id="settingsPanel">
     <summary>Settings</summary>
@@ -85,7 +90,7 @@
       <label>Long break after every <input type="number" id="sEvery" min="2" max="10"> focus sessions</label>
       <label>Spotify link (playlist, album or track)
         <input type="url" id="sSpotify" placeholder="https://open.spotify.com/playlist/…"></label>
-      <label class="check"><input type="checkbox" id="sAutoMusic"> Open the music when a focus session starts</label>
+      <label class="check"><input type="checkbox" id="sAutoMusic"> Play music during focus sessions and pause it on breaks</label>
       <div><button class="btn primary" id="sSave" style="min-width:0">Save settings</button></div>
     </div>
   </details>
@@ -105,7 +110,7 @@ try { if (window.parent !== window) t = TrelloPowerUp.iframe(); } catch {}
 
 let settings = { ...DEFAULTS };
 let mode = 'focus', remaining = settings.focus * 60, endsAt = null, tick = null;
-let streak = 0, cardData = {}, audio = null, musicOpened = false;
+let streak = 0, cardData = {}, audio = null;
 
 function secs(m) { return settings[m] * 60; }
 function fmt(s) { return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
@@ -128,7 +133,6 @@ function render() {
   document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
   const p = cardData.pomos || 0, sec = cardData.focusSec || 0;
   $('stats').textContent = `🍅 ${p} session${p === 1 ? '' : 's'} · ${fmtDur(sec)} focused on this card`;
-  $('music').hidden = !spotifyLink();
 }
 
 function setMode(m) { pause(); mode = m; remaining = secs(m); render(); }
@@ -136,7 +140,7 @@ function setMode(m) { pause(); mode = m; remaining = secs(m); render(); }
 function start() {
   if (endsAt) return;
   if (!audio) try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
-  if (mode === 'focus' && settings.autoMusic && !musicOpened) openMusic();
+  if (mode === 'focus' && settings.autoMusic) musicPlay();
   endsAt = Date.now() + remaining * 1000;
   tick = setInterval(() => {
     remaining = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
@@ -145,7 +149,12 @@ function start() {
   }, 250);
   render();
 }
-function pause() { clearInterval(tick); tick = null; endsAt = null; render(); }
+function pause() {
+  const wasRunning = !!endsAt;
+  clearInterval(tick); tick = null; endsAt = null;
+  if (wasRunning && settings.autoMusic) musicPause();
+  render();
+}
 
 // spent = focus seconds actually used in this session
 async function finish(spent) {
@@ -188,16 +197,41 @@ async function logFocus(spent) {
   render();
 }
 
-function spotifyLink() {
-  const u = (settings.spotifyUrl || '').trim();
-  return /^https:\/\/open\.spotify\.com\//.test(u) ? u : '';
+// ---- Spotify: an embedded player the timer plays and pauses ----
+let spotifyApi = null, controller = null, loadedUri = '', musicStarted = false, musicPaused = true;
+
+function spotifyUri(url) {
+  const m = /^https:\/\/open\.spotify\.com\/(?:intl-[\w-]+\/)?(playlist|album|track|artist|episode|show)\/([A-Za-z0-9]+)/
+    .exec((url || '').trim());
+  return m ? `spotify:${m[1]}:${m[2]}` : '';
 }
-function openMusic() {
-  const url = spotifyLink();
-  if (!url) return;
-  window.open(url, '_blank', 'noopener');
-  musicOpened = true;
+
+function setupPlayer() {
+  const uri = spotifyUri(settings.spotifyUrl);
+  $('player').hidden = !uri;
+  if (!uri) { if (controller) controller.pause(); return; }
+  $('openSpotify').href = settings.spotifyUrl;
+  if (!spotifyApi || uri === loadedUri) return;
+  loadedUri = uri; musicStarted = false;
+  if (controller) return controller.loadUri(uri);
+  spotifyApi.createController($('embed'), { uri, width: '100%', height: 152 }, c => {
+    controller = c;
+    c.addListener('playback_update', e => { musicPaused = e.data.isPaused; });
+  });
 }
+
+function musicPlay() {
+  if (!controller) return;
+  if (!musicStarted) { controller.play(); musicStarted = true; }
+  else if (musicPaused) controller.resume();
+}
+function musicPause() { if (controller && !musicPaused) controller.pause(); }
+
+window.onSpotifyIframeApiReady = api => { spotifyApi = api; setupPlayer(); };
+const spotifyScript = document.createElement('script');
+spotifyScript.src = 'https://open.spotify.com/embed/iframe-api/v1';
+spotifyScript.async = true;
+document.head.appendChild(spotifyScript);
 
 function chime() {
   if (!audio) return;
@@ -227,13 +261,14 @@ async function loadSettings() {
   settings = { ...DEFAULTS, ...(s || {}) };
   fillSettings();
   if (!endsAt) { remaining = secs(mode); }
+  setupPlayer();
   render();
 }
 
 $('sSave').onclick = async () => {
   const url = $('sSpotify').value.trim();
-  if (url && !/^https:\/\/open\.spotify\.com\//.test(url)) {
-    return say('That link should start with https://open.spotify.com/. In Spotify, use Share > Copy link.');
+  if (url && !spotifyUri(url)) {
+    return say('That doesn\'t look like a Spotify playlist, album or track link. In Spotify, use Share > Copy link.');
   }
   settings = {
     focus: clampInt($('sFocus').value, 1, 180, DEFAULTS.focus),
@@ -249,6 +284,7 @@ $('sSave').onclick = async () => {
     else localStorage.setItem('focus-settings', JSON.stringify(settings));
   } catch {}
   if (!endsAt) remaining = secs(mode); // a running session keeps its length; the new ones apply next
+  setupPlayer();
   render();
   say(endsAt ? 'Saved. New lengths start with the next session.' : 'Settings saved.');
 };
@@ -256,7 +292,6 @@ $('sSave').onclick = async () => {
 $('toggle').onclick = () => endsAt ? pause() : start();
 $('reset').onclick = () => setMode(mode);
 $('skip').onclick = () => finish(mode === 'focus' ? secs('focus') - remaining : 0);
-$('music').onclick = openMusic;
 $('modes').onclick = e => { if (e.target.dataset.mode) setMode(e.target.dataset.mode); };
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
